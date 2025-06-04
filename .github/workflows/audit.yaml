@@ -1,0 +1,16 @@
+name: Security audit # Workflow name
+on:
+  schedule:
+    - cron: "0 0 * * *" # Triggers the workflow daily at midnight UTC
+  push:
+    paths: # Triggers the workflow on pushes that change Cargo.toml or Cargo.lock files
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+jobs:
+  security_audit:
+    runs-on: ubuntu-latest # Specifies the runner environment
+    steps:
+      - uses: actions/checkout@v3 # Checks-out your repository
+      - uses: taiki-e/install-action@cargo-deny # Installs cargo-deny tool
+      - name: Scan for vulnerabilities # Step name
+        run: cargo deny check advisories # Runs cargo-deny to check for advisories (vulnerabilities) in dependencies
