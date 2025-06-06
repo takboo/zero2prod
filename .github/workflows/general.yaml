@@ -15,10 +15,6 @@ jobs:
     name: Test # Job name for running tests
     # This job will be executed on the latest version of Ubuntu.
     runs-on: ubuntu-latest # Specifies the runner environment
-    # The DATABASE_URL is set as an environment variable for the entire job.
-    # It will be available to all subsequent steps, including `cargo test`.
-    env:
-      DATABASE_URL: postgres://${{ env.APP_USER }}:${{ env.APP_USER_PWD }}@localhost:5432/${{ env.APP_DB_NAME }}
     # The `services` keyword creates a Docker container for the `postgres` service.
     # This service will be available on the network for all steps in the `test` job.
     # The runner can access the service using `localhost:<port>` because GitHub Actions maps the service's ports to the host.
@@ -38,6 +34,9 @@ jobs:
     steps:
       - name: Check out repository code
         uses: actions/checkout@v4 # Checks-out your repository under $GITHUB_WORKSPACE
+
+      - name: Set DATABASE_URL
+        run: echo "DATABASE_URL=postgres://${{ env.APP_USER }}:${{ env.APP_USER_PWD }}@localhost:5432/${{ env.APP_DB_NAME }}" >> $GITHUB_ENV
 
       - name: Install the Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1 # Sets up the Rust environment
@@ -121,10 +120,6 @@ jobs:
   coverage:
     name: Code coverage # Job name for generating code coverage reports
     runs-on: ubuntu-latest # Base runner, but steps run in a container
-    # DATABASE_URL is set at the job level, making it available to all steps.
-    # This is the correct way to pass connection strings to commands like `sqlx` and `cargo`.
-    env:
-      DATABASE_URL: postgres://${{ env.APP_USER }}:${{ env.APP_USER_PWD }}@localhost:5432/${{ env.APP_DB_NAME }}
     # The `services` keyword creates a Docker container for the `postgres` service.
     # This service is necessary because code coverage will run integration tests
     # that require a live database connection.
@@ -140,6 +135,9 @@ jobs:
     steps:
       - name: Check out repository code
         uses: actions/checkout@v4 # Checks-out your repository under $GITHUB_WORKSPACE
+
+      - name: Set DATABASE_URL
+        run: echo "DATABASE_URL=postgres://${{ env.APP_USER }}:${{ env.APP_USER_PWD }}@localhost:5432/${{ env.APP_DB_NAME }}" >> $GITHUB_ENV
 
       - name: Install the Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
