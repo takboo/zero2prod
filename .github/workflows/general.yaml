@@ -26,7 +26,7 @@ jobs:
         # These are used by the PostgreSQL image to initialize the database.
         env:
           POSTGRES_USER: postgres # Superuser for the database
-          POSTGRES_PASSWORD: maph3iFix0Maupiu9Ier5xahcoL2Ieng # Superuser password
+          POSTGRES_PASSWORD: password # Superuser password
           POSTGRES_DB: postgres # Default database name
         # Maps port 5432 in the service container to port 5432 on the host runner.
         ports:
@@ -128,7 +128,7 @@ jobs:
         image: postgres:17-alpine
         env:
           POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: maph3iFix0Maupiu9Ier5xahcoL2Ieng
+          POSTGRES_PASSWORD: password 
           POSTGRES_DB: postgres
         ports:
           - 5432:5432

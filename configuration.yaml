@@ -3,5 +3,5 @@ database:
   host: "127.0.0.1"
   port: 5432
   username: "postgres"
-  password: "maph3iFix0Maupiu9Ier5xahcoL2Ieng"
+  password: "password"
   database_name: "newsletter"
