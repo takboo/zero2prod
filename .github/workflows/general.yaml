@@ -4,50 +4,195 @@ on: [push, pull_request] # Triggers the workflow on push or pull request events
 
 env:
   CARGO_TERM_COLOR: always # Ensures cargo output uses colors
+  SQLX_VERSION: 0.8.6 # SQLx version
+  SQLX_FEATURES: "rustls,postgres" # SQLx features
+  APP_USER: app # Application user
+  APP_USER_PWD: secret # Application user password
+  APP_DB_NAME: newsletter # Application database name
 
 jobs:
   test:
     name: Test # Job name for running tests
+    # This job will be executed on the latest version of Ubuntu.
     runs-on: ubuntu-latest # Specifies the runner environment
+    # The DATABASE_URL is set as an environment variable for the entire job.
+    # It will be available to all subsequent steps, including `cargo test`.
+    env:
+      DATABASE_URL: postgres://${{ env.APP_USER }}:${{ env.APP_USER_PWD }}@localhost:5432/${{ env.APP_DB_NAME }}
+    # The `services` keyword creates a Docker container for the `postgres` service.
+    # This service will be available on the network for all steps in the `test` job.
+    # The runner can access the service using `localhost:<port>` because GitHub Actions maps the service's ports to the host.
+    services:
+      # Specifies the Docker image for the PostgreSQL service.
+      postgres:
+        image: postgres:17-alpine
+        # Sets environment variables in the service container.
+        # These are used by the PostgreSQL image to initialize the database.
+        env:
+          POSTGRES_USER: postgres # Superuser for the database
+          POSTGRES_PASSWORD: password # Superuser password
+          POSTGRES_DB: postgres # Default database name
+        # Maps port 5432 in the service container to port 5432 on the host runner.
+        ports:
+          - 5432:5432
     steps:
-      - uses: actions/checkout@v3 # Checks-out your repository under $GITHUB_WORKSPACE
-      - uses: dtolnay/rust-toolchain@stable # Installs the stable Rust toolchain
-      - uses: Swatinem/rust-cache@v2 # Caches dependencies to speed up workflows
-      - name: Run tests # Step name
-        run: cargo test # Command to run tests
+      - name: Check out repository code
+        uses: actions/checkout@v4 # Checks-out your repository under $GITHUB_WORKSPACE
+
+      - name: Install the Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1 # Sets up the Rust environment
+      
+      - name: Install sqlx-cli
+        # `sqlx-cli` is a command-line tool for managing SQLx projects,
+        # including database migrations and query checking.
+        run: cargo install sqlx-cli
+          --version=${{ env.SQLX_VERSION }}
+          --features ${{ env.SQLX_FEATURES }}
+          --no-default-features
+          --locked
+      
+      # This step sets up the application-specific database user and grants permissions.
+      # It connects to the PostgreSQL service as the superuser (`postgres`).
+      - name: Create app user in Postgres
+        run: |
+          # Installs the PostgreSQL client, which provides the `psql` command-line utility.
+          sudo apt-get install postgresql-client
+
+          # Creates a new database user with a password using environment variables defined at the workflow level.
+          CREATE_QUERY="CREATE USER ${APP_USER} WITH PASSWORD '${APP_USER_PWD}';"
+          PGPASSWORD="password" psql -U "postgres" -h "localhost" -c "${CREATE_QUERY}"
+
+          # Grants the new user the permission to create databases.
+          # This is necessary for the `sqlx database create` command to work when run by this user.
+          GRANT_QUERY="ALTER USER ${APP_USER} CREATEDB;"
+          PGPASSWORD="password" psql -U "postgres" -h "localhost" -c "${GRANT_QUERY}"
+      
+      # This step creates the application database and runs migrations.
+      # It uses `sqlx-cli` and the `DATABASE_URL` set for the job.
+      # This approach is self-contained within the CI workflow and avoids
+      # running local development scripts like `init-db.sh`.
+      - name: Run database migrations
+        run: |
+          sqlx database create
+          sqlx migrate run
+      
+      # Runs the test suite of the Rust project.
+      # `cargo test` will compile and run all tests in the workspace.
+      - name: Run tests
+        run: cargo test
+
+      # This step verifies that the queries in the codebase are up-to-date with the database schema.
+      # `cargo sqlx prepare` generates metadata for queries. The `--check` flag ensures that the
+      # existing metadata is fresh, failing the build if it's not.
+      - name: Check that queries are fresh
+        run: cargo sqlx prepare --workspace --check -- --all-targets
 
   fmt:
     name: Rustfmt # Job name for checking code formatting
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@v4
+      - name: Install the Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1 # Sets up the Rust environment
         with:
-          components: rustfmt # Installs rustfmt component
-      - name: Enforce formatting # Step name
-        run: cargo fmt --check # Checks if the code is formatted according to rustfmt rules
+          components: rustfmt
+      - name: Enforce formatting
+        run: cargo fmt --check
 
   clippy:
     name: Clippy # Job name for running Clippy linter
     runs-on: ubuntu-latest
+    env:
+      # This environment variable forces sqlx to use its offline mode,
+      # which means that it will not attempt to connect to a database
+      # when running the tests. It'll instead use the cached query results.
+      # We check that the cached query results are up-to-date in another job,
+      # to speed up the overall CI pipeline.
+      SQLX_OFFLINE: true
     steps:
-      - uses: actions/checkout@v3
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@v4
+      - name: Install the Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          components: clippy # Installs clippy component
-      - uses: Swatinem/rust-cache@v2
-      - name: Linting # Step name
-        run: cargo clippy -- -D warnings # Runs Clippy and treats all warnings as errors
+          components: clippy
+      - name: Linting
+        run: cargo clippy -- -D warnings
 
   coverage:
     name: Code coverage # Job name for generating code coverage reports
     runs-on: ubuntu-latest # Base runner, but steps run in a container
-    container:
-      image: xd009642/tarpaulin # Specifies the Docker image to use for this job (pre-configured with tarpaulin)
-      options: --security-opt seccomp=unconfined # Options for the Docker container, needed for tarpaulin to work correctly
+    # DATABASE_URL is set at the job level, making it available to all steps.
+    # This is the correct way to pass connection strings to commands like `sqlx` and `cargo`.
+    env:
+      DATABASE_URL: postgres://${{ env.APP_USER }}:${{ env.APP_USER_PWD }}@localhost:5432/${{ env.APP_DB_NAME }}
+    # The `services` keyword creates a Docker container for the `postgres` service.
+    # This service is necessary because code coverage will run integration tests
+    # that require a live database connection.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
     steps:
-      - name: Checkout repository # Step name
-        uses: actions/checkout@v3
-      - name: Generate code coverage # Step name
+      - name: Check out repository code
+        uses: actions/checkout@v4 # Checks-out your repository under $GITHUB_WORKSPACE
+
+      - name: Install the Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          # `llvm-tools` is required by `cargo-llvm-cov` to process the coverage data.
+          components: llvm-tools
+      
+      - name: Install sqlx-cli
+        # `sqlx-cli` is needed to prepare the database for the integration tests.
+        run: cargo install sqlx-cli
+          --version=${{ env.SQLX_VERSION }}
+          --features ${{ env.SQLX_FEATURES }}
+          --no-default-features
+          --locked
+      
+      # This step sets up the application-specific database user and grants permissions.
+      # It's a prerequisite for the database migration step.
+      - name: Create app user in Postgres
         run: |
-          cargo tarpaulin --verbose --workspace # Generates code coverage report for the entire workspace
+          # Installs the PostgreSQL client, which provides the `psql` command-line utility.
+          sudo apt-get install postgresql-client
+
+          # Creates a new database user with a password.
+          CREATE_QUERY="CREATE USER ${APP_USER} WITH PASSWORD '${APP_USER_PWD}';"
+          PGPASSWORD="password" psql -U "postgres" -h "localhost" -c "${CREATE_QUERY}"
+
+          # Grants the new user the permission to create databases.
+          GRANT_QUERY="ALTER USER ${APP_USER} CREATEDB;"
+          PGPASSWORD="password" psql -U "postgres" -h "localhost" -c "${GRANT_QUERY}"
+ 
+      # This step creates the application database and runs migrations.
+      # It automatically uses the `DATABASE_URL` environment variable defined at the job level.
+      - name: Run database migrations
+        run: |
+          sqlx database create
+          sqlx migrate run
+      
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+      # This step generates the code coverage report.
+      # `cargo llvm-cov` runs the tests and collects coverage data simultaneously.
+      # `--all-features` ensures all features of the crate are enabled.
+      # `--workspace` runs tests for all crates in the workspace.
+      # `--lcov` specifies the output format for the coverage data.
+      # `--output-path` defines the name of the output file.
+      - name: Generate code coverage
+        run: cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
+      # This step generates a human-readable HTML report from the coverage data.
+      - name: Generate report
+        run: cargo llvm-cov report --html --output-dir coverage
+      # This step uploads the generated HTML coverage report as a workflow artifact.
+      # The report can be downloaded from the summary page of the workflow run.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: "Coverage report"
+          path: coverage/

@@ -1,15 +1,6 @@
-use actix_web::dev::Server;
-use actix_web::{App, HttpResponse, HttpServer, Responder, get};
-use std::net::TcpListener;
+pub mod configuration;
+mod routes;
+pub mod startup;
 
-#[get("/health_check")]
-async fn health_check() -> impl Responder {
-    HttpResponse::Ok().finish()
-}
-
-pub fn run(listener: TcpListener) -> Result<Server, std::io::Error> {
-    let server = HttpServer::new(|| App::new().service(health_check))
-        .listen(listener)?
-        .run();
-    Ok(server)
-}
+pub use configuration::get_configuration;
+pub use startup::run;
