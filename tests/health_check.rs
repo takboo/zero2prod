@@ -109,6 +109,43 @@ async fn subscribe_returns_a_200_for_valid_form_data() {
 }
 
 #[tokio::test]
+async fn subscribe_returns_a_500_when_the_subscription_fails() {
+    let test_app = spawn_app().await;
+    let client = reqwest::Client::new();
+
+    let body = "name=le%20guin&email=ursula_le_guin%40gmail.com";
+
+    let response = client
+        .post(format!("{}/subscriptions", test_app.address))
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .body(body)
+        .send()
+        .await
+        .expect("Failed to execute request.");
+
+    assert_eq!(200, response.status().as_u16());
+
+    let saved = sqlx::query!("SELECT email, name FROM subscriptions",)
+        .fetch_one(&test_app.connection_pool)
+        .await
+        .expect("Failed to fetch saved subscription.");
+
+    assert_eq!(saved.email, "ursula_le_guin@gmail.com");
+    assert_eq!(saved.name, "le guin");
+
+    // subscribe the same name and email will return a 500
+    let response = client
+        .post(format!("{}/subscriptions", test_app.address))
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .body(body)
+        .send()
+        .await
+        .expect("Failed to execute request.");
+
+    assert_eq!(500, response.status().as_u16());
+}
+
+#[tokio::test]
 async fn subscribe_returns_a_400_when_data_is_missing() {
     let test_app = spawn_app().await;
     let client = reqwest::Client::new();
