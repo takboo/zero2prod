@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 actix-web = "4.11.0"
 chrono = "0.4.41"
+claims = "0.8.0"
 config = "0.15.11"
 once_cell = "1.21.3"
 secrecy = { version = "0.10.3", features = ["serde"] }
@@ -28,7 +29,9 @@ tracing-subscriber = { version = "0.3.19", features = [
     "registry",
     "env-filter",
 ] }
+unicode-segmentation = "1.12.0"
 uuid = { version = "1.17.0", features = ["v4"] }
+validator = { version = "0.20.0", features = ["derive"] }
 
 [lib]
 path = "src/lib.rs"
@@ -38,4 +41,6 @@ path = "src/main.rs"
 name = "zero2prod"
 
 [dev-dependencies]
+fake = { version = "4.3.0", features = ["chrono"] }
+proptest = "1.7.0"
 reqwest = "0.12.19"

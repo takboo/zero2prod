@@ -1,7 +1,10 @@
 use sqlx::postgres::PgPoolOptions;
 use std::net::TcpListener;
 use zero2prod::startup::run;
-use zero2prod::{get_configuration, get_subscriber, init_subscriber};
+use zero2prod::{
+    get_configuration,
+    telemetry::{get_subscriber, init_subscriber},
+};
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
