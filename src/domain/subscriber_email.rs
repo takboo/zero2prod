@@ -1,6 +1,7 @@
 use validator::Validate;
 
-#[derive(Debug, Validate)]
+#[derive(Debug, Validate, Clone, serde::Deserialize)]
+#[serde(try_from = "String")]
 pub struct SubscriberEmail {
     #[validate(email)]
     email: String,

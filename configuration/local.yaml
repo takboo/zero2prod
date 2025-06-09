@@ -2,4 +2,7 @@ application:
   host: "127.0.0.1"
 database:
   require_ssl: false
-  acquire_timeout_secs: 2
+  acquire_timeout_millis: 2000
+email_client:
+  base_url: "http://127.0.0.1"
+  sender_email: "test@example.com"

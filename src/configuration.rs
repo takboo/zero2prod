@@ -1,12 +1,16 @@
+use crate::domain::SubscriberEmail;
 use secrecy::{ExposeSecret, SecretBox};
+use serde::Deserialize;
 use serde_aux::field_attributes::deserialize_number_from_string;
 use sqlx::ConnectOptions;
 use sqlx::postgres::{PgConnectOptions, PgSslMode};
+use std::time::Duration;
 
 #[derive(serde::Deserialize, Debug)]
 pub struct Settings {
     pub database: DatabaseSettings,
     pub application: ApplicationSettings,
+    pub email_client: EmailClientSettings,
 }
 
 #[derive(serde::Deserialize, Debug)]
@@ -15,8 +19,11 @@ pub struct DatabaseSettings {
     pub password: SecretBox<String>,
     #[serde(deserialize_with = "deserialize_number_from_string")]
     pub port: u16,
-    #[serde(deserialize_with = "deserialize_number_from_string")]
-    pub acquire_timeout_secs: u64,
+    #[serde(
+        rename = "acquire_timeout_millis",
+        deserialize_with = "deserialize_duration_from_millis"
+    )]
+    pub acquire_timeout: Duration,
     pub host: String,
     pub database_name: String,
     pub require_ssl: bool,
@@ -27,6 +34,26 @@ pub struct ApplicationSettings {
     pub host: String,
     #[serde(deserialize_with = "deserialize_number_from_string")]
     pub port: u16,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct EmailClientSettings {
+    pub base_url: String,
+    pub sender_email: SubscriberEmail,
+    pub authorization_token: SecretBox<String>,
+    #[serde(
+        rename = "timeout_duration_millis",
+        deserialize_with = "deserialize_duration_from_millis"
+    )]
+    pub timeout: Duration,
+}
+
+fn deserialize_duration_from_millis<'de, D>(deserializer: D) -> Result<Duration, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let millis = u64::deserialize(deserializer)?;
+    Ok(Duration::from_millis(millis))
 }
 
 pub enum Environment {

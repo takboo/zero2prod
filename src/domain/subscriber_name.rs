@@ -1,38 +1,46 @@
 use unicode_segmentation::UnicodeSegmentation;
+use validator::{Validate, ValidationError};
 
-#[derive(Debug)]
-pub struct SubscriberName(String);
+fn validate_subscriber_name(s: &str) -> Result<(), ValidationError> {
+    if s.trim().is_empty() {
+        return Err(ValidationError::new("Subscriber name cannot be empty"));
+    }
+    if s.graphemes(true).count() > 256 {
+        return Err(ValidationError::new(
+            "Subscriber name cannot be longer than 256 characters",
+        ));
+    }
+    let forbidden_characters = [
+        '/', '(', ')', '[', ']', '{', '}', '"', '<', '>', '\\', '|', '`', '$', ';', ':', '.', ',',
+    ];
+    if s.chars().any(|c| forbidden_characters.contains(&c)) {
+        return Err(ValidationError::new(
+            "Subscriber name cannot contain forbidden characters",
+        ));
+    }
+    Ok(())
+}
+
+#[derive(Debug, Validate)]
+pub struct SubscriberName {
+    #[validate(custom(function = "validate_subscriber_name"))]
+    pub name: String,
+}
 
 impl AsRef<str> for SubscriberName {
     fn as_ref(&self) -> &str {
-        &self.0
+        &self.name
     }
 }
 
 impl TryFrom<String> for SubscriberName {
     type Error = String;
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        if value.trim().is_empty() {
-            return Err(String::from("Subscriber name cannot be empty"));
+        let s = SubscriberName { name: value };
+        match s.validate() {
+            Ok(_) => Ok(s),
+            Err(_) => Err(format!("{} is not a valid subscriber name", s.name)),
         }
-
-        if value.graphemes(true).count() > 256 {
-            return Err(String::from(
-                "Subscriber name cannot be longer than 256 characters",
-            ));
-        }
-        let forbidden_characters = [
-            '/', '(', ')', '[', ']', '{', '}', '"', '<', '>', '\\', '|', '`', '$', ';', ':', '.',
-            ',',
-        ];
-
-        if value.chars().any(|c| forbidden_characters.contains(&c)) {
-            return Err(String::from(
-                "Subscriber name cannot contain forbidden characters",
-            ));
-        }
-
-        Ok(Self(value))
     }
 }
 

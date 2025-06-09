@@ -6,3 +6,6 @@ database:
   username: "postgres"
   password: "password"
   database_name: "newsletter"
+email_client:
+  authorization_token: "test-token"
+  timeout_duration_millis: 10000
