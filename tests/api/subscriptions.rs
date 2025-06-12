@@ -1,4 +1,4 @@
-use crate::helpers::spawn_app;
+use crate::helpers::{spawn_app, spawn_app_with_base_url};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, ResponseTemplate};
 
@@ -139,4 +139,43 @@ async fn subscribe_sends_a_confirmation_email_for_valid_data() {
     let confirmation_links = app.get_confirmation_links(email_request);
     // The two links should be identical
     assert_eq!(confirmation_links.html, confirmation_links.plain_text);
+}
+
+#[tokio::test]
+async fn subscribe_sends_a_confirmation_email_with_a_link_handling_base_url_variations() {
+    // Arrange
+    let base_urls = [
+        "http://127.0.0.1".to_string(),
+        "http://127.0.0.1/".to_string(),
+    ];
+
+    for base_url in base_urls {
+        let app = spawn_app_with_base_url(base_url).await;
+        let body = "name=le%20guin&email=ursula_le_guin%40gmail.com";
+
+        Mock::given(path("/email"))
+            .and(method("POST"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&app.email_server)
+            .await;
+
+        // Act
+        app.post_subscriptions(body).await;
+
+        // Assert
+        let email_request = &app.email_server.received_requests().await.unwrap()[0];
+        let confirmation_links = app.get_confirmation_links(email_request);
+
+        // The link returned by the app should have the correct base URL structure
+        // regardless of the trailing slash in the configuration.
+        // `get_confirmation_links` already adjusts the port for us.
+        let mut expected_link_origin = reqwest::Url::parse(&app.address).unwrap();
+        expected_link_origin.set_path("/subscriptions/confirm");
+
+        assert_eq!(
+            confirmation_links.html.origin(),
+            expected_link_origin.origin()
+        );
+        assert_eq!(confirmation_links.html.path(), expected_link_origin.path());
+    }
 }

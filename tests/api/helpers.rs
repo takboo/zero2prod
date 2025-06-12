@@ -66,18 +66,20 @@ static TRACING: Lazy<()> = Lazy::new(|| {
     }
 });
 
-pub async fn spawn_app() -> TestApp {
+async fn spawn_app_impl(base_url_override: Option<String>) -> TestApp {
     Lazy::force(&TRACING);
 
     let email_server = MockServer::start().await;
 
     let configuration = {
         let mut c = get_configuration().expect("Failed to read configuration.");
-        // Use a different database for each test case
         c.database.database_name = uuid::Uuid::new_v4().to_string();
-        // Use a random OS port
         c.application.port = 0;
         c.email_client.base_url = email_server.uri();
+
+        if let Some(base_url) = base_url_override {
+            c.application.base_url = base_url;
+        }
         c
     };
 
@@ -85,7 +87,7 @@ pub async fn spawn_app() -> TestApp {
     let application = Application::build(configuration.clone())
         .await
         .expect("Failed to build application.");
-    // Get the port before spawning the application
+
     let application_port = application.port();
     let address = format!("http://127.0.0.1:{}", application_port);
     tokio::spawn(application.run_until_stopped());
@@ -96,6 +98,14 @@ pub async fn spawn_app() -> TestApp {
         connection_pool: get_connection_pool(&configuration.database),
         port: application_port,
     }
+}
+
+pub async fn spawn_app() -> TestApp {
+    spawn_app_impl(None).await
+}
+
+pub async fn spawn_app_with_base_url(base_url: String) -> TestApp {
+    spawn_app_impl(Some(base_url)).await
 }
 
 async fn configure_database(config: &DatabaseSettings) -> PgPool {

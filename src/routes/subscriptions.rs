@@ -5,7 +5,9 @@ use actix_web::{HttpResponse, Responder, post, web};
 use chrono::Utc;
 use rand::Rng;
 use rand::distr::Alphanumeric;
+use reqwest;
 use sqlx::{PgConnection, PgPool};
+use std::error::Error;
 use uuid::Uuid;
 
 #[derive(serde::Deserialize)]
@@ -134,25 +136,26 @@ async fn send_confirm_email(
     subscriber: NewSubscriber,
     base_url: &str,
     subscription_token: &str,
-) -> Result<(), reqwest::Error> {
-    let confirmation_link = format!(
-        "{}/subscriptions/confirm?subscription_token={}",
-        base_url, subscription_token
-    );
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let confirmation_link = {
+        let base = reqwest::Url::parse(base_url)?;
+        let mut url = base.join("subscriptions/confirm")?;
+        url.query_pairs_mut()
+            .append_pair("subscription_token", subscription_token);
+        url
+    };
     let html = format!(
         "Welcome to our newsletter!<br />\
                 Click <a href=\"{}\">here</a> to confirm your subscription.",
         confirmation_link
-    )
-    .to_owned();
+    );
     let text = format!(
         "Welcome to our newsletter!\nVisit {} to confirm your subscription.",
         confirmation_link
-    )
-    .to_owned();
+    );
 
     email_client
-        .send_email(subscriber.email, "Welcome", html.as_str(), text.as_str())
+        .send_email(subscriber.email, "Welcome", &html, &text)
         .await
         .map_err(|e| {
             tracing::error!("Failed to send email: {:?}", e);

@@ -4,5 +4,5 @@ database:
   require_ssl: true
   acquire_timeout_millis: 10000
 email_client:
-  base_url: http://bulk.api.mailtrap.io
+  base_url: "https://bulk.api.mailtrap.io"
   sender_email: "hello@demomailtrap.co"
