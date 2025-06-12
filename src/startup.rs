@@ -1,6 +1,6 @@
 use crate::EmailClient;
 use crate::configuration::{DatabaseSettings, Settings};
-use crate::routes::{health_check, subscribe};
+use crate::routes::{confirm, health_check, subscribe};
 use actix_web::dev::Server;
 use actix_web::{App, HttpServer, web::Data};
 use sqlx::PgPool;
@@ -30,7 +30,12 @@ impl Application {
         );
         let listener = TcpListener::bind(address).expect("Failed to bind port 8080");
         let port = listener.local_addr()?.port();
-        let server = run(listener, pg_pool, email_client)?;
+        let server = run(
+            listener,
+            pg_pool,
+            email_client,
+            ApplicationBaseUrl(configuration.application.base_url),
+        )?;
 
         Ok(Self { port, server })
     }
@@ -50,20 +55,27 @@ pub fn get_connection_pool(db_configuration: &DatabaseSettings) -> PgPool {
         .connect_lazy_with(db_configuration.with_db())
 }
 
+pub struct ApplicationBaseUrl(pub String);
+
 fn run(
     listener: TcpListener,
     pg_pool: PgPool,
     email_client: EmailClient,
+    base_url: ApplicationBaseUrl,
 ) -> Result<Server, std::io::Error> {
     let pg_pool = Data::new(pg_pool);
     let email_client = Data::new(email_client);
+    let base_url = Data::new(base_url);
+
     let server = HttpServer::new(move || {
         App::new()
             .wrap(TracingLogger::default())
             .app_data(pg_pool.clone())
             .app_data(email_client.clone())
+            .app_data(base_url.clone())
             .service(health_check)
             .service(subscribe)
+            .service(confirm)
     })
     .listen(listener)?
     .run();

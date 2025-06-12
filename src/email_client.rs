@@ -39,12 +39,12 @@ impl EmailClient {
     ) -> Result<(), reqwest::Error> {
         let url = format!("{}/api/send", self.base_url);
         let sender = EmailInfo {
-            email: self.sender.as_ref().into(),
-            name: "".into(),
+            email: self.sender.as_ref(),
+            name: "",
         };
         let to = EmailInfo {
-            email: recipient.as_ref().into(),
-            name: "".into(),
+            email: recipient.as_ref(),
+            name: "",
         };
         let request_body = SendEmailRequest {
             subject: subject.into(),
@@ -69,19 +69,23 @@ impl EmailClient {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct EmailInfo<'a> {
-    email: Cow<'a, str>,
-    name: Cow<'a, str>,
+pub struct EmailInfo<'a> {
+    pub email: &'a str,
+    pub name: &'a str,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct SendEmailRequest<'a> {
-    from: EmailInfo<'a>,
-    to: Vec<EmailInfo<'a>>,
-    subject: Cow<'a, str>,
-    text: Cow<'a, str>,
-    html: Cow<'a, str>,
-    category: Cow<'a, str>,
+pub struct SendEmailRequest<'a> {
+    pub from: EmailInfo<'a>,
+    pub to: Vec<EmailInfo<'a>>,
+    #[serde(borrow)]
+    pub subject: Cow<'a, str>,
+    #[serde(borrow)]
+    pub text: Cow<'a, str>,
+    #[serde(borrow)]
+    pub html: Cow<'a, str>,
+    #[serde(borrow)]
+    pub category: Cow<'a, str>,
 }
 
 #[cfg(test)]
