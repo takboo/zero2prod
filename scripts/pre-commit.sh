@@ -19,3 +19,6 @@ echo "  cargo test"
 cargo test
 
 echo "Pre-commit hook passed." 
+
+echo "  sqlx prepare check"
+cargo sqlx prepare --workspace --check -- --all-targets
