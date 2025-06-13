@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 actix-web = "4.11.0"
+anyhow = "1.0.98"
 chrono = "0.4.41"
 claims = "0.8.0"
 config = "0.15.11"
@@ -25,6 +26,7 @@ sqlx = { version = "0.8.6", default-features = false, features = [
     "chrono",
     "migrate",
 ] }
+thiserror = "2.0.12"
 tokio = { version = "1.45.1", features = ["macros", "rt-multi-thread"] }
 tracing = { version = "0.1.41", features = ["log"] }
 tracing-actix-web = "0.7.18"
@@ -34,6 +36,7 @@ tracing-subscriber = { version = "0.3.19", features = [
     "env-filter",
 ] }
 unicode-segmentation = "1.12.0"
+url = "2.5.4"
 uuid = { version = "1.17.0", features = ["v4"] }
 validator = { version = "0.20.0", features = ["derive"] }
 

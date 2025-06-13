@@ -1,13 +1,14 @@
 use crate::EmailClient;
 use crate::domain::NewSubscriber;
 use crate::startup::ApplicationBaseUrl;
-use actix_web::{HttpResponse, Responder, post, web};
+use actix_web::http::StatusCode;
+use actix_web::{HttpResponse, ResponseError, post, web};
+use anyhow::Context;
 use chrono::Utc;
 use rand::Rng;
 use rand::distr::Alphanumeric;
 use reqwest;
 use sqlx::{PgConnection, PgPool};
-use std::error::Error;
 use uuid::Uuid;
 
 #[derive(serde::Deserialize)]
@@ -27,43 +28,37 @@ async fn subscribe(
     pg_pool: web::Data<PgPool>,
     email_client: web::Data<EmailClient>,
     base_url: web::Data<ApplicationBaseUrl>,
-) -> impl Responder {
-    let mut transaction = match pg_pool.begin().await {
-        Ok(db) => db,
-        Err(_) => return HttpResponse::InternalServerError().finish(),
-    };
+) -> Result<HttpResponse, SubscribeError> {
+    let mut transaction = pg_pool
+        .begin()
+        .await
+        .context("Failed to acquire a Postgres connection from the pool")?;
 
-    let subscriber: NewSubscriber = match form.0.try_into() {
-        Ok(subscriber) => subscriber,
-        Err(_) => return HttpResponse::BadRequest().finish(),
-    };
+    let subscriber: NewSubscriber = form.0.try_into().map_err(SubscribeError::ValidationError)?;
 
-    let subscriber_id = match insert_subscriber(&mut transaction, &subscriber).await {
-        Ok(subscriber_id) => subscriber_id,
-        Err(_) => return HttpResponse::InternalServerError().finish(),
-    };
+    let subscriber_id = insert_subscriber(&mut transaction, &subscriber)
+        .await
+        .context("Failed to insert new subscriber in the database")?;
 
     let subscriber_token = generate_subscription_token();
 
-    if store_token(&mut transaction, subscriber_id, &subscriber_token)
+    store_token(&mut transaction, subscriber_id, &subscriber_token)
         .await
-        .is_err()
-    {
-        return HttpResponse::InternalServerError().finish();
-    }
+        .context("Failed to store the confirmation token for a new subscriber")?;
 
-    if transaction.commit().await.is_err() {
-        return HttpResponse::InternalServerError().finish();
-    }
-
-    if send_confirm_email(&email_client, subscriber, &base_url.0, &subscriber_token)
+    transaction
+        .commit()
         .await
-        .is_err()
-    {
-        return HttpResponse::InternalServerError().finish();
-    }
+        .context("Failed to commit SQL transaction to store a new subscriber")?;
 
-    HttpResponse::Ok().finish()
+    let confirmation_link = create_confirmation_link(&base_url.0, &subscriber_token)
+        .context("Failed to create a confirmation link for a new subscriber")?;
+
+    send_confirm_email(&email_client, subscriber, confirmation_link)
+        .await
+        .context("Failed to send the confirmation email")?;
+
+    Ok(HttpResponse::Ok().finish())
 }
 /// Generate a random 25-characters-long case-sensitive subscription token.
 fn generate_subscription_token() -> String {
@@ -95,11 +90,7 @@ async fn insert_subscriber(
         "pending_confirmation"
     )
     .execute(pg_connection)
-    .await
-    .map_err(|e| {
-        tracing::error!("Failed to insert subscriber: {:?}", e);
-        e
-    })?;
+    .await?;
     Ok(subscriber_id)
 }
 
@@ -119,31 +110,34 @@ pub async fn store_token(
         subscriber_id
     )
     .execute(pg_connection)
-    .await
-    .map_err(|e| {
-        tracing::error!("Failed to execute query: {:?}", e);
-        e
-    })?;
+    .await?;
     Ok(())
 }
 
 #[tracing::instrument(
+    name = "Create new confirmation link for new subscriber",
+    skip(base_url)
+)]
+fn create_confirmation_link(
+    base_url: &str,
+    subscription_token: &str,
+) -> Result<url::Url, url::ParseError> {
+    let base = url::Url::parse(base_url)?;
+    let mut url = base.join("subscriptions/confirm")?;
+    url.query_pairs_mut()
+        .append_pair("subscription_token", subscription_token);
+    Ok(url)
+}
+
+#[tracing::instrument(
     name = "Send a confirmation email to a new subscriber",
-    skip(email_client, subscriber, base_url, subscription_token)
+    skip(email_client, subscriber, confirmation_link)
 )]
 async fn send_confirm_email(
     email_client: &EmailClient,
     subscriber: NewSubscriber,
-    base_url: &str,
-    subscription_token: &str,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let confirmation_link = {
-        let base = reqwest::Url::parse(base_url)?;
-        let mut url = base.join("subscriptions/confirm")?;
-        url.query_pairs_mut()
-            .append_pair("subscription_token", subscription_token);
-        url
-    };
+    confirmation_link: url::Url,
+) -> Result<(), reqwest::Error> {
     let html = format!(
         "Welcome to our newsletter!<br />\
                 Click <a href=\"{}\">here</a> to confirm your subscription.",
@@ -156,10 +150,42 @@ async fn send_confirm_email(
 
     email_client
         .send_email(subscriber.email, "Welcome", &html, &text)
-        .await
-        .map_err(|e| {
-            tracing::error!("Failed to send email: {:?}", e);
-            e
-        })?;
+        .await?;
+    Ok(())
+}
+
+#[derive(thiserror::Error)]
+pub enum SubscribeError {
+    #[error("{0}")]
+    ValidationError(String),
+    #[error(transparent)]
+    UnexpectedError(#[from] anyhow::Error),
+}
+
+impl std::fmt::Debug for SubscribeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        error_chain_fmt(self, f)
+    }
+}
+
+impl ResponseError for SubscribeError {
+    fn status_code(&self) -> StatusCode {
+        match self {
+            SubscribeError::ValidationError(_) => StatusCode::BAD_REQUEST,
+            SubscribeError::UnexpectedError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+}
+
+fn error_chain_fmt(
+    e: &(dyn std::error::Error + 'static),
+    f: &mut std::fmt::Formatter<'_>,
+) -> std::fmt::Result {
+    writeln!(f, "{}", e)?;
+    let mut current = e.source();
+    while let Some(cause) = current {
+        writeln!(f, "Cause by:\n\t {}", cause)?;
+        current = cause.source();
+    }
     Ok(())
 }
