@@ -149,7 +149,7 @@ async fn send_confirm_email(
     );
 
     email_client
-        .send_email(subscriber.email, "Welcome", &html, &text)
+        .send_email(&subscriber.email, "Welcome", &html, &text)
         .await?;
     Ok(())
 }
@@ -177,7 +177,7 @@ impl ResponseError for SubscribeError {
     }
 }
 
-fn error_chain_fmt(
+pub fn error_chain_fmt(
     e: &(dyn std::error::Error + 'static),
     f: &mut std::fmt::Formatter<'_>,
 ) -> std::fmt::Result {
