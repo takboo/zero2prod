@@ -1,5 +1,8 @@
+use argon2::password_hash::SaltString;
+use argon2::{Algorithm, Argon2, Params, PasswordHasher, Version};
 use once_cell::sync::Lazy;
 use sqlx::{Connection, Executor, PgConnection, PgPool};
+use uuid::Uuid;
 use wiremock::MockServer;
 use zero2prod::configuration::DatabaseSettings;
 use zero2prod::email_client::SendEmailRequest;
@@ -12,6 +15,7 @@ pub struct TestApp {
     pub address: String,
     pub email_server: MockServer,
     pub port: u16,
+    pub test_user: TestUser,
 }
 
 pub struct ConfirmationLinks {
@@ -33,6 +37,10 @@ impl TestApp {
     pub async fn post_newsletters(&self, body: serde_json::Value) -> reqwest::Response {
         reqwest::Client::new()
             .post(format!("{}/newsletters", &self.address))
+            .basic_auth(
+                self.test_user.username.as_str(),
+                Some(self.test_user.password.as_str()),
+            )
             .json(&body)
             .send()
             .await
@@ -52,7 +60,7 @@ impl TestApp {
             .links(s)
             .filter(|l| *l.kind() == linkify::LinkKind::Url)
             .collect();
-        let raw_link = links.get(0).expect("Failed to find raw url").as_str();
+        let raw_link = links.first().expect("Failed to find raw url").as_str();
         let mut confirmation_link = reqwest::Url::parse(raw_link).expect("Invalid raw url");
         // Let's make sure we don't call random APIs on the web
         assert_eq!(confirmation_link.host_str().unwrap(), "127.0.0.1");
@@ -81,7 +89,7 @@ async fn spawn_app_impl(base_url_override: Option<String>) -> TestApp {
 
     let configuration = {
         let mut c = get_configuration().expect("Failed to read configuration.");
-        c.database.database_name = uuid::Uuid::new_v4().to_string();
+        c.database.database_name = Uuid::new_v4().to_string();
         c.application.port = 0;
         c.email_client.base_url = email_server.uri();
 
@@ -100,12 +108,15 @@ async fn spawn_app_impl(base_url_override: Option<String>) -> TestApp {
     let address = format!("http://127.0.0.1:{}", application_port);
     tokio::spawn(application.run_until_stopped());
 
-    TestApp {
+    let test_app = TestApp {
         address,
         email_server,
         connection_pool: get_connection_pool(&configuration.database),
         port: application_port,
-    }
+        test_user: TestUser::generate(),
+    };
+    test_app.test_user.store(&test_app.connection_pool).await;
+    test_app
 }
 
 pub async fn spawn_app() -> TestApp {
@@ -137,4 +148,43 @@ async fn configure_database(config: &DatabaseSettings) -> PgPool {
         .expect("Failed to run database migrations.");
 
     connection_pool
+}
+
+pub struct TestUser {
+    user_id: Uuid,
+    pub username: String,
+    pub password: String,
+}
+
+impl TestUser {
+    pub fn generate() -> Self {
+        Self {
+            user_id: Uuid::new_v4(),
+            username: Uuid::new_v4().to_string(),
+            password: Uuid::new_v4().to_string(),
+        }
+    }
+
+    async fn store(&self, pg_pool: &PgPool) {
+        let salt = SaltString::generate(&mut rand::thread_rng());
+        let password_hash = Argon2::new(
+            Algorithm::Argon2id,
+            Version::V0x13,
+            Params::new(15000, 2, 1, None).unwrap(),
+        )
+        .hash_password(self.password.as_bytes(), &salt)
+        .unwrap()
+        .to_string();
+
+        sqlx::query!(
+            "INSERT INTO users (user_id, username, password_hash)
+        VALUES ($1, $2, $3)",
+            self.user_id,
+            self.username,
+            password_hash,
+        )
+        .execute(pg_pool)
+        .await
+        .expect("Failed to store test users.");
+    }
 }

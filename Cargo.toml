@@ -6,10 +6,12 @@ edition = "2024"
 [dependencies]
 actix-web = "4.11.0"
 anyhow = "1.0.98"
+argon2 = { version = "0.5.3", features = ["std"] }
+base64 = "0.22.1"
 chrono = "0.4.41"
 claims = "0.8.0"
 config = "0.15.11"
-rand = { version = "0.9.1", features = ["std_rng"] }
+rand = { version = "0.8.5", features = ["std_rng"] }
 reqwest = { version = "0.12.19", default-features = false, features = [
     "json",
     "rustls-tls",
